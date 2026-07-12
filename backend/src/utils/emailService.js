@@ -1,5 +1,5 @@
 const nodemailer = require('nodemailer');
-const EmailLog = require('../models/EmailLog');
+const { EmailLog } = require('../models');
 
 let transporter = null;
 const isConfigured = () => Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
@@ -22,10 +22,11 @@ const getTransporter = () => {
 // demoable without real SMTP infrastructure.
 const sendEmail = async ({ to, subject, body, relatedDriver = null }) => {
   const t = getTransporter();
+  const relatedDriverId = relatedDriver;
 
   if (!t) {
     console.log(`[email:simulated] to=${to} subject="${subject}"\n${body}`);
-    await EmailLog.create({ to, subject, body, relatedDriver, status: 'simulated' });
+    await EmailLog.create({ to, subject, body, relatedDriverId, status: 'simulated' });
     return { simulated: true };
   }
 
@@ -36,10 +37,10 @@ const sendEmail = async ({ to, subject, body, relatedDriver = null }) => {
       subject,
       text: body,
     });
-    await EmailLog.create({ to, subject, body, relatedDriver, status: 'sent' });
+    await EmailLog.create({ to, subject, body, relatedDriverId, status: 'sent' });
     return { simulated: false };
   } catch (err) {
-    await EmailLog.create({ to, subject, body, relatedDriver, status: 'failed', error: err.message });
+    await EmailLog.create({ to, subject, body, relatedDriverId, status: 'failed', error: err.message });
     throw err;
   }
 };

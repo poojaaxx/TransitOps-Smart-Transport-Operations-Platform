@@ -1,15 +1,14 @@
-const Vehicle = require('../models/Vehicle');
-const Driver = require('../models/Driver');
-const Trip = require('../models/Trip');
+const { Op, fn, col } = require('sequelize');
+const { Vehicle, Driver, Trip } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { VEHICLE_STATUS, DRIVER_STATUS, TRIP_STATUS } = require('../utils/constants');
 
 const buildVehicleFilter = ({ type, status, region }) => {
-  const filter = {};
-  if (type) filter.type = type;
-  if (status) filter.status = status;
-  if (region) filter.region = region;
-  return filter;
+  const where = {};
+  if (type) where.type = type;
+  if (status) where.status = status;
+  if (region) where.region = region;
+  return where;
 };
 
 // GET /api/dashboard/kpis?type=&status=&region=
@@ -18,28 +17,28 @@ const getKpis = asyncHandler(async (req, res) => {
 
   const [totalVehicles, activeVehicles, availableVehicles, inMaintenanceVehicles, onTripVehicles] =
     await Promise.all([
-      Vehicle.countDocuments(vehicleFilter),
-      Vehicle.countDocuments({ ...vehicleFilter, status: { $ne: VEHICLE_STATUS.RETIRED } }),
-      Vehicle.countDocuments({ ...vehicleFilter, status: VEHICLE_STATUS.AVAILABLE }),
-      Vehicle.countDocuments({ ...vehicleFilter, status: VEHICLE_STATUS.IN_SHOP }),
-      Vehicle.countDocuments({ ...vehicleFilter, status: VEHICLE_STATUS.ON_TRIP }),
+      Vehicle.count({ where: vehicleFilter }),
+      Vehicle.count({ where: { ...vehicleFilter, status: { [Op.ne]: VEHICLE_STATUS.RETIRED } } }),
+      Vehicle.count({ where: { ...vehicleFilter, status: VEHICLE_STATUS.AVAILABLE } }),
+      Vehicle.count({ where: { ...vehicleFilter, status: VEHICLE_STATUS.IN_SHOP } }),
+      Vehicle.count({ where: { ...vehicleFilter, status: VEHICLE_STATUS.ON_TRIP } }),
     ]);
 
   // Scope trip counts to the filtered vehicle pool whenever a vehicle filter is active.
   const hasVehicleFilter = Object.keys(vehicleFilter).length > 0;
-  let tripVehicleIds = null;
+  let tripWhere = {};
   if (hasVehicleFilter) {
-    tripVehicleIds = await Vehicle.find(vehicleFilter).distinct('_id');
+    const matchingVehicles = await Vehicle.findAll({ where: vehicleFilter, attributes: ['_id'], raw: true });
+    tripWhere = { vehicleId: { [Op.in]: matchingVehicles.map((v) => v._id) } };
   }
-  const tripQuery = tripVehicleIds ? { vehicle: { $in: tripVehicleIds } } : {};
 
   const [activeTrips, pendingTrips] = await Promise.all([
-    Trip.countDocuments({ ...tripQuery, status: TRIP_STATUS.DISPATCHED }),
-    Trip.countDocuments({ ...tripQuery, status: TRIP_STATUS.DRAFT }),
+    Trip.count({ where: { ...tripWhere, status: TRIP_STATUS.DISPATCHED } }),
+    Trip.count({ where: { ...tripWhere, status: TRIP_STATUS.DRAFT } }),
   ]);
 
-  const driversOnDuty = await Driver.countDocuments({
-    status: { $in: [DRIVER_STATUS.AVAILABLE, DRIVER_STATUS.ON_TRIP] },
+  const driversOnDuty = await Driver.count({
+    where: { status: { [Op.in]: [DRIVER_STATUS.AVAILABLE, DRIVER_STATUS.ON_TRIP] } },
   });
 
   const fleetUtilization = activeVehicles > 0 ? Number(((onTripVehicles / activeVehicles) * 100).toFixed(1)) : 0;
@@ -59,18 +58,19 @@ const getKpis = asyncHandler(async (req, res) => {
 // GET /api/dashboard/vehicle-status-breakdown?type=&region=
 const getVehicleStatusBreakdown = asyncHandler(async (req, res) => {
   const { type, region } = req.query;
-  const filter = buildVehicleFilter({ type, region });
+  const where = buildVehicleFilter({ type, region });
 
-  const breakdown = await Vehicle.aggregate([
-    { $match: filter },
-    { $group: { _id: '$status', count: { $sum: 1 } } },
-    { $project: { _id: 0, status: '$_id', count: 1 } },
-  ]);
+  const breakdown = await Vehicle.findAll({
+    where,
+    attributes: ['status', [fn('COUNT', col('_id')), 'count']],
+    group: ['status'],
+    raw: true,
+  });
 
   const allStatuses = Object.values(VEHICLE_STATUS);
   const merged = allStatuses.map((status) => ({
     status,
-    count: breakdown.find((b) => b.status === status)?.count || 0,
+    count: Number(breakdown.find((b) => b.status === status)?.count) || 0,
   }));
 
   res.json(merged);
@@ -83,18 +83,16 @@ const getTripsTrend = asyncHandler(async (req, res) => {
   since.setDate(since.getDate() - (days - 1));
   since.setHours(0, 0, 0, 0);
 
-  const trend = await Trip.aggregate([
-    { $match: { createdAt: { $gte: since } } },
-    {
-      $group: {
-        _id: {
-          date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-          status: '$status',
-        },
-        count: { $sum: 1 },
-      },
-    },
-  ]);
+  const trend = await Trip.findAll({
+    where: { createdAt: { [Op.gte]: since } },
+    attributes: [
+      [fn('DATE_FORMAT', col('createdAt'), '%Y-%m-%d'), 'date'],
+      'status',
+      [fn('COUNT', col('_id')), 'count'],
+    ],
+    group: [fn('DATE_FORMAT', col('createdAt'), '%Y-%m-%d'), 'status'],
+    raw: true,
+  });
 
   const dayList = [];
   for (let i = 0; i < days; i += 1) {
@@ -106,9 +104,9 @@ const getTripsTrend = asyncHandler(async (req, res) => {
   const result = dayList.map((date) => {
     const entry = { date, Draft: 0, Dispatched: 0, Completed: 0, Cancelled: 0 };
     trend
-      .filter((t) => t._id.date === date)
+      .filter((t) => t.date === date)
       .forEach((t) => {
-        entry[t._id.status] = t.count;
+        entry[t.status] = Number(t.count);
       });
     return entry;
   });

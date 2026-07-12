@@ -1,27 +1,29 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
 const { TRIP_STATUS } = require('../utils/constants');
 
-const tripSchema = new mongoose.Schema(
+const Trip = sequelize.define(
+  'Trip',
   {
-    source: { type: String, required: true, trim: true },
-    destination: { type: String, required: true, trim: true },
-    vehicle: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle', required: true },
-    driver: { type: mongoose.Schema.Types.ObjectId, ref: 'Driver', required: true },
-    cargoWeightKg: { type: Number, required: true, min: 0 },
-    plannedDistanceKm: { type: Number, required: true, min: 0 },
-    actualDistanceKm: { type: Number, default: null },
-    revenue: { type: Number, default: 0, min: 0 },
+    _id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    source: { type: DataTypes.STRING, allowNull: false },
+    destination: { type: DataTypes.STRING, allowNull: false },
+    vehicleId: { type: DataTypes.INTEGER, allowNull: false },
+    driverId: { type: DataTypes.INTEGER, allowNull: false },
+    cargoWeightKg: { type: DataTypes.FLOAT, allowNull: false, validate: { min: 0 } },
+    plannedDistanceKm: { type: DataTypes.FLOAT, allowNull: false, validate: { min: 0 } },
+    actualDistanceKm: { type: DataTypes.FLOAT, allowNull: true, defaultValue: null },
+    revenue: { type: DataTypes.FLOAT, defaultValue: 0, validate: { min: 0 } },
     status: {
-      type: String,
-      enum: Object.values(TRIP_STATUS),
-      default: TRIP_STATUS.DRAFT,
+      type: DataTypes.ENUM(...Object.values(TRIP_STATUS)),
+      defaultValue: TRIP_STATUS.DRAFT,
     },
-    dispatchedAt: { type: Date, default: null },
-    completedAt: { type: Date, default: null },
-    cancelledAt: { type: Date, default: null },
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    dispatchedAt: { type: DataTypes.DATE, allowNull: true, defaultValue: null },
+    completedAt: { type: DataTypes.DATE, allowNull: true, defaultValue: null },
+    cancelledAt: { type: DataTypes.DATE, allowNull: true, defaultValue: null },
+    createdBy: { type: DataTypes.INTEGER, allowNull: true },
   },
-  { timestamps: true }
+  { tableName: 'trips', timestamps: true }
 );
 
-module.exports = mongoose.model('Trip', tripSchema);
+module.exports = Trip;

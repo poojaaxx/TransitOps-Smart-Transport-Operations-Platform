@@ -1,19 +1,24 @@
-const Expense = require('../models/Expense');
+const { Op } = require('sequelize');
+const { Expense, Vehicle } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 
 // GET /api/expenses?vehicle=&category=&from=&to=
 const listExpenses = asyncHandler(async (req, res) => {
   const { vehicle, category, from, to } = req.query;
-  const query = {};
-  if (vehicle) query.vehicle = vehicle;
-  if (category) query.category = category;
+  const where = {};
+  if (vehicle) where.vehicleId = vehicle;
+  if (category) where.category = category;
   if (from || to) {
-    query.date = {};
-    if (from) query.date.$gte = new Date(from);
-    if (to) query.date.$lte = new Date(to);
+    where.date = {};
+    if (from) where.date[Op.gte] = new Date(from);
+    if (to) where.date[Op.lte] = new Date(to);
   }
 
-  const expenses = await Expense.find(query).populate('vehicle', 'registrationNumber name').sort({ date: -1 });
+  const expenses = await Expense.findAll({
+    where,
+    include: [{ model: Vehicle, as: 'vehicle', attributes: ['_id', 'registrationNumber', 'name'] }],
+    order: [['date', 'DESC']],
+  });
   res.json(expenses);
 });
 
@@ -25,7 +30,7 @@ const createExpense = asyncHandler(async (req, res) => {
   }
 
   const expense = await Expense.create({
-    vehicle: vehicle || null,
+    vehicleId: vehicle || null,
     category,
     amount,
     date: date || new Date(),
@@ -37,8 +42,9 @@ const createExpense = asyncHandler(async (req, res) => {
 
 // DELETE /api/expenses/:id
 const deleteExpense = asyncHandler(async (req, res) => {
-  const expense = await Expense.findByIdAndDelete(req.params.id);
+  const expense = await Expense.findByPk(req.params.id);
   if (!expense) return res.status(404).json({ message: 'Expense not found' });
+  await expense.destroy();
   res.json({ message: 'Expense deleted' });
 });
 

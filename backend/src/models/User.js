@@ -1,39 +1,54 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
 const bcrypt = require('bcryptjs');
-const { ROLE_LIST } = require('../utils/constants');
+const { sequelize } = require('../config/database');
 
-const userSchema = new mongoose.Schema(
+const User = sequelize.define(
+  'User',
   {
-    name: { type: String, required: true, trim: true },
+    _id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    name: { type: DataTypes.STRING, allowNull: false },
     email: {
-      type: String,
-      required: true,
+      type: DataTypes.STRING,
+      allowNull: false,
       unique: true,
-      lowercase: true,
-      trim: true,
+      validate: { isEmail: true },
+      set(value) {
+        this.setDataValue('email', value.toLowerCase().trim());
+      },
     },
-    password: { type: String, required: true, minlength: 6, select: false },
-    role: { type: String, enum: ROLE_LIST, required: true },
-    // Link a User with role=Driver to their Driver record, if applicable.
-    driver: { type: mongoose.Schema.Types.ObjectId, ref: 'Driver', default: null },
-    isActive: { type: Boolean, default: true },
+    password: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      validate: { len: [6, 255] },
+    },
+    roleId: { type: DataTypes.INTEGER, allowNull: false },
+    driverId: { type: DataTypes.INTEGER, allowNull: true },
+    isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
   },
-  { timestamps: true }
+  { tableName: 'users', timestamps: true }
 );
 
-userSchema.pre('save', async function hashPassword() {
-  if (!this.isModified('password')) return;
-  this.password = await bcrypt.hash(this.password, 10);
+User.beforeSave(async (user) => {
+  if (!user.changed('password')) return;
+  user.password = await bcrypt.hash(user.password, 10);
 });
 
-userSchema.methods.comparePassword = function comparePassword(candidate) {
+User.prototype.comparePassword = function comparePassword(candidate) {
   return bcrypt.compare(candidate, this.password);
 };
 
-userSchema.methods.toSafeObject = function toSafeObject() {
-  const obj = this.toObject();
+// Flattens the joined Role into a plain `role` string (matching the old
+// Mongoose enum-string shape) and strips internal FK/association fields so
+// the frontend never has to change how it reads `user.role`.
+User.prototype.toSafeObject = function toSafeObject() {
+  const obj = this.toJSON();
   delete obj.password;
+  if (this.RoleRef) {
+    obj.role = this.RoleRef.name;
+  }
+  delete obj.RoleRef;
+  delete obj.roleId;
   return obj;
 };
 
-module.exports = mongoose.model('User', userSchema);
+module.exports = User;

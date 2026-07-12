@@ -1,5 +1,6 @@
 const cron = require('node-cron');
-const Driver = require('../models/Driver');
+const { Op } = require('sequelize');
+const { Driver } = require('../models');
 const { sendEmail } = require('../utils/emailService');
 
 const REMINDER_WINDOW_DAYS = 30;
@@ -16,9 +17,11 @@ const runLicenseExpiryCheck = async () => {
   const renotifyThreshold = new Date();
   renotifyThreshold.setDate(renotifyThreshold.getDate() - RENOTIFY_AFTER_DAYS);
 
-  const candidates = await Driver.find({
-    licenseExpiryDate: { $lte: windowEnd },
-    $or: [{ expiryReminderSentAt: null }, { expiryReminderSentAt: { $lte: renotifyThreshold } }],
+  const candidates = await Driver.findAll({
+    where: {
+      licenseExpiryDate: { [Op.lte]: windowEnd },
+      [Op.or]: [{ expiryReminderSentAt: null }, { expiryReminderSentAt: { [Op.lte]: renotifyThreshold } }],
+    },
   });
 
   const results = [];

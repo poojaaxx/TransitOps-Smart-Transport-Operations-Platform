@@ -1,19 +1,23 @@
-const FuelLog = require('../models/FuelLog');
-const Vehicle = require('../models/Vehicle');
+const { Op } = require('sequelize');
+const { FuelLog, Vehicle } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 
 // GET /api/fuel-logs?vehicle=&from=&to=
 const listFuelLogs = asyncHandler(async (req, res) => {
   const { vehicle, from, to } = req.query;
-  const query = {};
-  if (vehicle) query.vehicle = vehicle;
+  const where = {};
+  if (vehicle) where.vehicleId = vehicle;
   if (from || to) {
-    query.date = {};
-    if (from) query.date.$gte = new Date(from);
-    if (to) query.date.$lte = new Date(to);
+    where.date = {};
+    if (from) where.date[Op.gte] = new Date(from);
+    if (to) where.date[Op.lte] = new Date(to);
   }
 
-  const logs = await FuelLog.find(query).populate('vehicle', 'registrationNumber name').sort({ date: -1 });
+  const logs = await FuelLog.findAll({
+    where,
+    include: [{ model: Vehicle, as: 'vehicle', attributes: ['_id', 'registrationNumber', 'name'] }],
+    order: [['date', 'DESC']],
+  });
   res.json(logs);
 });
 
@@ -23,11 +27,11 @@ const createFuelLog = asyncHandler(async (req, res) => {
   if (!vehicleId || liters == null || cost == null) {
     return res.status(400).json({ message: 'vehicle, liters, and cost are required' });
   }
-  const vehicle = await Vehicle.findById(vehicleId);
+  const vehicle = await Vehicle.findByPk(vehicleId);
   if (!vehicle) return res.status(404).json({ message: 'Vehicle not found' });
 
   const log = await FuelLog.create({
-    vehicle: vehicleId,
+    vehicleId,
     liters,
     cost,
     date: date || new Date(),
@@ -39,8 +43,9 @@ const createFuelLog = asyncHandler(async (req, res) => {
 
 // DELETE /api/fuel-logs/:id
 const deleteFuelLog = asyncHandler(async (req, res) => {
-  const log = await FuelLog.findByIdAndDelete(req.params.id);
+  const log = await FuelLog.findByPk(req.params.id);
   if (!log) return res.status(404).json({ message: 'Fuel log not found' });
+  await log.destroy();
   res.json({ message: 'Fuel log deleted' });
 });
 

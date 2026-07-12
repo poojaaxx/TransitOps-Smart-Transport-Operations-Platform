@@ -1,39 +1,39 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
 const { DRIVER_STATUS } = require('../utils/constants');
 
-const driverSchema = new mongoose.Schema(
+const Driver = sequelize.define(
+  'Driver',
   {
-    name: { type: String, required: true, trim: true },
-    licenseNumber: { type: String, required: true, unique: true, trim: true },
+    _id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    name: { type: DataTypes.STRING, allowNull: false },
+    licenseNumber: { type: DataTypes.STRING, allowNull: false, unique: true },
     licenseCategory: {
-      type: String,
-      required: true,
-      enum: ['LMV', 'HMV', 'HGV', 'PSV', 'Motorcycle', 'Other'],
+      type: DataTypes.ENUM('LMV', 'HMV', 'HGV', 'PSV', 'Motorcycle', 'Other'),
+      allowNull: false,
     },
-    licenseExpiryDate: { type: Date, required: true },
-    contactNumber: { type: String, required: true, trim: true },
+    licenseExpiryDate: { type: DataTypes.DATE, allowNull: false },
+    contactNumber: { type: DataTypes.STRING, allowNull: false },
     // Not in the original field spec, but required to actually deliver the
     // license-expiry reminder emails (bonus feature). Optional so existing
     // records without an email on file don't break anything.
-    email: { type: String, trim: true, lowercase: true, default: null },
-    safetyScore: { type: Number, min: 0, max: 100, default: 100 },
+    email: { type: DataTypes.STRING, allowNull: true },
+    safetyScore: { type: DataTypes.FLOAT, defaultValue: 100, validate: { min: 0, max: 100 } },
     status: {
-      type: String,
-      enum: Object.values(DRIVER_STATUS),
-      default: DRIVER_STATUS.AVAILABLE,
+      type: DataTypes.ENUM(...Object.values(DRIVER_STATUS)),
+      defaultValue: DRIVER_STATUS.AVAILABLE,
     },
     // Tracks whether an expiry reminder email has already gone out, so the
     // cron job doesn't spam the same driver every run.
-    expiryReminderSentAt: { type: Date, default: null },
+    expiryReminderSentAt: { type: DataTypes.DATE, allowNull: true, defaultValue: null },
+    isLicenseExpired: {
+      type: DataTypes.VIRTUAL,
+      get() {
+        return this.licenseExpiryDate < new Date();
+      },
+    },
   },
-  { timestamps: true }
+  { tableName: 'drivers', timestamps: true }
 );
 
-driverSchema.virtual('isLicenseExpired').get(function isLicenseExpired() {
-  return this.licenseExpiryDate < new Date();
-});
-
-driverSchema.set('toJSON', { virtuals: true });
-driverSchema.set('toObject', { virtuals: true });
-
-module.exports = mongoose.model('Driver', driverSchema);
+module.exports = Driver;

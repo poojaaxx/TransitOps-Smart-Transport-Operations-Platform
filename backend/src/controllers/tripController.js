@@ -1,29 +1,34 @@
-const Trip = require('../models/Trip');
-const Vehicle = require('../models/Vehicle');
-const Driver = require('../models/Driver');
+const { sequelize, Trip, Vehicle, Driver } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { VEHICLE_STATUS, DRIVER_STATUS, TRIP_STATUS } = require('../utils/constants');
 
 // GET /api/trips?status=&vehicle=&driver=&sortBy=&sortDir=
 const listTrips = asyncHandler(async (req, res) => {
   const { status, vehicle, driver, sortBy = 'createdAt', sortDir = 'desc' } = req.query;
-  const query = {};
-  if (status) query.status = status;
-  if (vehicle) query.vehicle = vehicle;
-  if (driver) query.driver = driver;
+  const where = {};
+  if (status) where.status = status;
+  if (vehicle) where.vehicleId = vehicle;
+  if (driver) where.driverId = driver;
 
-  const trips = await Trip.find(query)
-    .populate('vehicle', 'registrationNumber name type')
-    .populate('driver', 'name licenseNumber')
-    .sort({ [sortBy]: sortDir === 'asc' ? 1 : -1 });
+  const trips = await Trip.findAll({
+    where,
+    include: [
+      { model: Vehicle, as: 'vehicle', attributes: ['_id', 'registrationNumber', 'name', 'type'] },
+      { model: Driver, as: 'driver', attributes: ['_id', 'name', 'licenseNumber'] },
+    ],
+    order: [[sortBy, sortDir === 'asc' ? 'ASC' : 'DESC']],
+  });
   res.json(trips);
 });
 
 // GET /api/trips/:id
 const getTrip = asyncHandler(async (req, res) => {
-  const trip = await Trip.findById(req.params.id)
-    .populate('vehicle')
-    .populate('driver');
+  const trip = await Trip.findByPk(req.params.id, {
+    include: [
+      { model: Vehicle, as: 'vehicle' },
+      { model: Driver, as: 'driver' },
+    ],
+  });
   if (!trip) return res.status(404).json({ message: 'Trip not found' });
   res.json(trip);
 });
@@ -39,13 +44,13 @@ const createTrip = asyncHandler(async (req, res) => {
     });
   }
 
-  const vehicle = await Vehicle.findById(vehicleId);
+  const vehicle = await Vehicle.findByPk(vehicleId);
   if (!vehicle) return res.status(404).json({ message: 'Vehicle not found' });
   if (vehicle.status !== VEHICLE_STATUS.AVAILABLE) {
     return res.status(409).json({ message: `Vehicle is ${vehicle.status} and is not eligible for dispatch` });
   }
 
-  const driver = await Driver.findById(driverId);
+  const driver = await Driver.findByPk(driverId);
   if (!driver) return res.status(404).json({ message: 'Driver not found' });
   if (driver.status !== DRIVER_STATUS.AVAILABLE) {
     return res.status(409).json({ message: `Driver is ${driver.status} and cannot be assigned to a trip` });
@@ -63,8 +68,8 @@ const createTrip = asyncHandler(async (req, res) => {
   const trip = await Trip.create({
     source,
     destination,
-    vehicle: vehicleId,
-    driver: driverId,
+    vehicleId,
+    driverId,
     cargoWeightKg,
     plannedDistanceKm,
     revenue: revenue || 0,
@@ -77,7 +82,7 @@ const createTrip = asyncHandler(async (req, res) => {
 
 // PATCH /api/trips/:id - edit a Draft trip's details (not lifecycle transitions)
 const updateTrip = asyncHandler(async (req, res) => {
-  const trip = await Trip.findById(req.params.id);
+  const trip = await Trip.findByPk(req.params.id);
   if (!trip) return res.status(404).json({ message: 'Trip not found' });
   if (trip.status !== TRIP_STATUS.DRAFT) {
     return res.status(409).json({ message: 'Only Draft trips can be edited' });
@@ -90,7 +95,7 @@ const updateTrip = asyncHandler(async (req, res) => {
   });
 
   if (update.cargoWeightKg != null) {
-    const vehicle = await Vehicle.findById(trip.vehicle);
+    const vehicle = await Vehicle.findByPk(trip.vehicleId);
     if (update.cargoWeightKg > vehicle.maxLoadCapacityKg) {
       return res.status(409).json({
         message: `Cargo weight (${update.cargoWeightKg}kg) exceeds vehicle max load capacity (${vehicle.maxLoadCapacityKg}kg)`,
@@ -98,102 +103,111 @@ const updateTrip = asyncHandler(async (req, res) => {
     }
   }
 
-  Object.assign(trip, update);
-  await trip.save();
+  await trip.update(update);
   res.json(trip);
 });
 
 // POST /api/trips/:id/dispatch
 const dispatchTrip = asyncHandler(async (req, res) => {
-  const trip = await Trip.findById(req.params.id);
-  if (!trip) return res.status(404).json({ message: 'Trip not found' });
-  if (trip.status !== TRIP_STATUS.DRAFT) {
-    return res.status(409).json({ message: `Only Draft trips can be dispatched (current status: ${trip.status})` });
-  }
+  const result = await sequelize.transaction(async (t) => {
+    const trip = await Trip.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!trip) return { status: 404, body: { message: 'Trip not found' } };
+    if (trip.status !== TRIP_STATUS.DRAFT) {
+      return { status: 409, body: { message: `Only Draft trips can be dispatched (current status: ${trip.status})` } };
+    }
 
-  const vehicle = await Vehicle.findById(trip.vehicle);
-  const driver = await Driver.findById(trip.driver);
+    const vehicle = await Vehicle.findByPk(trip.vehicleId, { transaction: t, lock: t.LOCK.UPDATE });
+    const driver = await Driver.findByPk(trip.driverId, { transaction: t, lock: t.LOCK.UPDATE });
 
-  if (vehicle.status !== VEHICLE_STATUS.AVAILABLE) {
-    return res.status(409).json({ message: `Vehicle is ${vehicle.status} and cannot be dispatched` });
-  }
-  if (driver.status !== DRIVER_STATUS.AVAILABLE) {
-    return res.status(409).json({ message: `Driver is ${driver.status} and cannot be dispatched` });
-  }
-  if (driver.licenseExpiryDate < new Date()) {
-    return res.status(409).json({ message: 'Driver license is expired and cannot be dispatched' });
-  }
+    if (vehicle.status !== VEHICLE_STATUS.AVAILABLE) {
+      return { status: 409, body: { message: `Vehicle is ${vehicle.status} and cannot be dispatched` } };
+    }
+    if (driver.status !== DRIVER_STATUS.AVAILABLE) {
+      return { status: 409, body: { message: `Driver is ${driver.status} and cannot be dispatched` } };
+    }
+    if (driver.licenseExpiryDate < new Date()) {
+      return { status: 409, body: { message: 'Driver license is expired and cannot be dispatched' } };
+    }
 
-  trip.status = TRIP_STATUS.DISPATCHED;
-  trip.dispatchedAt = new Date();
-  vehicle.status = VEHICLE_STATUS.ON_TRIP;
-  driver.status = DRIVER_STATUS.ON_TRIP;
+    await trip.update({ status: TRIP_STATUS.DISPATCHED, dispatchedAt: new Date() }, { transaction: t });
+    await vehicle.update({ status: VEHICLE_STATUS.ON_TRIP }, { transaction: t });
+    await driver.update({ status: DRIVER_STATUS.ON_TRIP }, { transaction: t });
 
-  await Promise.all([trip.save(), vehicle.save(), driver.save()]);
-  res.json(trip);
+    return { status: 200, body: trip };
+  });
+
+  res.status(result.status).json(result.body);
 });
 
 // POST /api/trips/:id/complete
 const completeTrip = asyncHandler(async (req, res) => {
   const { actualDistanceKm, revenue } = req.body;
-  const trip = await Trip.findById(req.params.id);
-  if (!trip) return res.status(404).json({ message: 'Trip not found' });
-  if (trip.status !== TRIP_STATUS.DISPATCHED) {
-    return res.status(409).json({ message: `Only Dispatched trips can be completed (current status: ${trip.status})` });
-  }
 
-  const vehicle = await Vehicle.findById(trip.vehicle);
-  const driver = await Driver.findById(trip.driver);
+  const result = await sequelize.transaction(async (t) => {
+    const trip = await Trip.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!trip) return { status: 404, body: { message: 'Trip not found' } };
+    if (trip.status !== TRIP_STATUS.DISPATCHED) {
+      return { status: 409, body: { message: `Only Dispatched trips can be completed (current status: ${trip.status})` } };
+    }
 
-  trip.status = TRIP_STATUS.COMPLETED;
-  trip.completedAt = new Date();
-  if (actualDistanceKm != null) trip.actualDistanceKm = actualDistanceKm;
-  if (revenue != null) trip.revenue = revenue;
+    const vehicle = await Vehicle.findByPk(trip.vehicleId, { transaction: t, lock: t.LOCK.UPDATE });
+    const driver = await Driver.findByPk(trip.driverId, { transaction: t, lock: t.LOCK.UPDATE });
 
-  if (vehicle.status === VEHICLE_STATUS.ON_TRIP) vehicle.status = VEHICLE_STATUS.AVAILABLE;
-  if (driver.status === DRIVER_STATUS.ON_TRIP) driver.status = DRIVER_STATUS.AVAILABLE;
+    const tripUpdate = { status: TRIP_STATUS.COMPLETED, completedAt: new Date() };
+    if (actualDistanceKm != null) tripUpdate.actualDistanceKm = actualDistanceKm;
+    if (revenue != null) tripUpdate.revenue = revenue;
+    await trip.update(tripUpdate, { transaction: t });
 
-  await Promise.all([trip.save(), vehicle.save(), driver.save()]);
-  res.json(trip);
+    if (vehicle.status === VEHICLE_STATUS.ON_TRIP) {
+      await vehicle.update({ status: VEHICLE_STATUS.AVAILABLE }, { transaction: t });
+    }
+    if (driver.status === DRIVER_STATUS.ON_TRIP) {
+      await driver.update({ status: DRIVER_STATUS.AVAILABLE }, { transaction: t });
+    }
+
+    return { status: 200, body: trip };
+  });
+
+  res.status(result.status).json(result.body);
 });
 
 // POST /api/trips/:id/cancel
 const cancelTrip = asyncHandler(async (req, res) => {
-  const trip = await Trip.findById(req.params.id);
-  if (!trip) return res.status(404).json({ message: 'Trip not found' });
-  if (![TRIP_STATUS.DRAFT, TRIP_STATUS.DISPATCHED].includes(trip.status)) {
-    return res.status(409).json({ message: `Only Draft or Dispatched trips can be cancelled (current status: ${trip.status})` });
-  }
-
-  const wasDispatched = trip.status === TRIP_STATUS.DISPATCHED;
-  trip.status = TRIP_STATUS.CANCELLED;
-  trip.cancelledAt = new Date();
-  await trip.save();
-
-  if (wasDispatched) {
-    const vehicle = await Vehicle.findById(trip.vehicle);
-    const driver = await Driver.findById(trip.driver);
-    if (vehicle && vehicle.status === VEHICLE_STATUS.ON_TRIP) {
-      vehicle.status = VEHICLE_STATUS.AVAILABLE;
-      await vehicle.save();
+  const result = await sequelize.transaction(async (t) => {
+    const trip = await Trip.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!trip) return { status: 404, body: { message: 'Trip not found' } };
+    if (![TRIP_STATUS.DRAFT, TRIP_STATUS.DISPATCHED].includes(trip.status)) {
+      return { status: 409, body: { message: `Only Draft or Dispatched trips can be cancelled (current status: ${trip.status})` } };
     }
-    if (driver && driver.status === DRIVER_STATUS.ON_TRIP) {
-      driver.status = DRIVER_STATUS.AVAILABLE;
-      await driver.save();
-    }
-  }
 
-  res.json(trip);
+    const wasDispatched = trip.status === TRIP_STATUS.DISPATCHED;
+    await trip.update({ status: TRIP_STATUS.CANCELLED, cancelledAt: new Date() }, { transaction: t });
+
+    if (wasDispatched) {
+      const vehicle = await Vehicle.findByPk(trip.vehicleId, { transaction: t, lock: t.LOCK.UPDATE });
+      const driver = await Driver.findByPk(trip.driverId, { transaction: t, lock: t.LOCK.UPDATE });
+      if (vehicle && vehicle.status === VEHICLE_STATUS.ON_TRIP) {
+        await vehicle.update({ status: VEHICLE_STATUS.AVAILABLE }, { transaction: t });
+      }
+      if (driver && driver.status === DRIVER_STATUS.ON_TRIP) {
+        await driver.update({ status: DRIVER_STATUS.AVAILABLE }, { transaction: t });
+      }
+    }
+
+    return { status: 200, body: trip };
+  });
+
+  res.status(result.status).json(result.body);
 });
 
 // DELETE /api/trips/:id - only Draft trips can be deleted outright
 const deleteTrip = asyncHandler(async (req, res) => {
-  const trip = await Trip.findById(req.params.id);
+  const trip = await Trip.findByPk(req.params.id);
   if (!trip) return res.status(404).json({ message: 'Trip not found' });
   if (trip.status !== TRIP_STATUS.DRAFT) {
     return res.status(409).json({ message: 'Only Draft trips can be deleted; cancel dispatched trips instead' });
   }
-  await trip.deleteOne();
+  await trip.destroy();
   res.json({ message: 'Trip deleted' });
 });
 

@@ -1,15 +1,18 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
 
-const fuelLogSchema = new mongoose.Schema(
+const FuelLog = sequelize.define(
+  'FuelLog',
   {
-    vehicle: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle', required: true },
-    liters: { type: Number, required: true, min: 0 },
-    cost: { type: Number, required: true, min: 0 },
-    date: { type: Date, required: true, default: Date.now },
-    odometerKm: { type: Number, min: 0 },
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    _id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    vehicleId: { type: DataTypes.INTEGER, allowNull: false },
+    liters: { type: DataTypes.FLOAT, allowNull: false, validate: { min: 0 } },
+    cost: { type: DataTypes.FLOAT, allowNull: false, validate: { min: 0 } },
+    date: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    odometerKm: { type: DataTypes.FLOAT, allowNull: true, validate: { min: 0 } },
+    createdBy: { type: DataTypes.INTEGER, allowNull: true },
   },
-  { timestamps: true }
+  { tableName: 'fuel_logs', timestamps: true }
 );
 
-module.exports = mongoose.model('FuelLog', fuelLogSchema);
+module.exports = FuelLog;

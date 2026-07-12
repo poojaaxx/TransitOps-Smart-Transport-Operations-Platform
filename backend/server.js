@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const path = require('path');
-const connectDB = require('./src/config/db');
+const { connectDB } = require('./src/config/database');
 const { errorHandler, notFound } = require('./src/middleware/errorHandler');
 const { scheduleLicenseReminderJob } = require('./src/jobs/licenseReminderJob');
 
@@ -49,7 +49,7 @@ connectDB()
     scheduleLicenseReminderJob();
   })
   .catch((err) => {
-    console.error('Failed to connect to MongoDB:', err.message);
+    console.error('Failed to connect to MySQL:', err.message);
     process.exit(1);
   });
 

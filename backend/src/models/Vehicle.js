@@ -1,43 +1,34 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
 const { VEHICLE_STATUS } = require('../utils/constants');
 
-const documentSchema = new mongoose.Schema(
+const Vehicle = sequelize.define(
+  'Vehicle',
   {
-    name: { type: String, required: true },
-    fileUrl: { type: String, required: true },
-    mimeType: String,
-    uploadedAt: { type: Date, default: Date.now },
-  },
-  { _id: true }
-);
-
-const vehicleSchema = new mongoose.Schema(
-  {
+    _id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     registrationNumber: {
-      type: String,
-      required: true,
+      type: DataTypes.STRING,
+      allowNull: false,
       unique: true,
-      uppercase: true,
-      trim: true,
+      set(value) {
+        this.setDataValue('registrationNumber', value.toUpperCase().trim());
+      },
     },
-    name: { type: String, required: true, trim: true }, // Vehicle name/model
+    name: { type: DataTypes.STRING, allowNull: false },
     type: {
-      type: String,
-      required: true,
-      enum: ['Truck', 'Van', 'Bus', 'Car', 'Trailer', 'Other'],
+      type: DataTypes.ENUM('Truck', 'Van', 'Bus', 'Car', 'Trailer', 'Other'),
+      allowNull: false,
     },
-    maxLoadCapacityKg: { type: Number, required: true, min: 0 },
-    odometerKm: { type: Number, required: true, min: 0, default: 0 },
-    acquisitionCost: { type: Number, required: true, min: 0 },
+    maxLoadCapacityKg: { type: DataTypes.FLOAT, allowNull: false, validate: { min: 0 } },
+    odometerKm: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 0, validate: { min: 0 } },
+    acquisitionCost: { type: DataTypes.FLOAT, allowNull: false, validate: { min: 0 } },
     status: {
-      type: String,
-      enum: Object.values(VEHICLE_STATUS),
-      default: VEHICLE_STATUS.AVAILABLE,
+      type: DataTypes.ENUM(...Object.values(VEHICLE_STATUS)),
+      defaultValue: VEHICLE_STATUS.AVAILABLE,
     },
-    region: { type: String, trim: true, default: 'Unassigned' },
-    documents: [documentSchema],
+    region: { type: DataTypes.STRING, defaultValue: 'Unassigned' },
   },
-  { timestamps: true }
+  { tableName: 'vehicles', timestamps: true }
 );
 
-module.exports = mongoose.model('Vehicle', vehicleSchema);
+module.exports = Vehicle;

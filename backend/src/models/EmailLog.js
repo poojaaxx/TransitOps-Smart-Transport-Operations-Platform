@@ -1,18 +1,21 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
 
 // Records every reminder email the system generates. When SMTP credentials
 // are not configured, sending is simulated and still logged here so the
 // feature is fully demoable without real email infra.
-const emailLogSchema = new mongoose.Schema(
+const EmailLog = sequelize.define(
+  'EmailLog',
   {
-    to: { type: String, required: true },
-    subject: { type: String, required: true },
-    body: { type: String, required: true },
-    relatedDriver: { type: mongoose.Schema.Types.ObjectId, ref: 'Driver', default: null },
-    status: { type: String, enum: ['sent', 'simulated', 'failed'], required: true },
-    error: { type: String, default: null },
+    _id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    to: { type: DataTypes.STRING, allowNull: false },
+    subject: { type: DataTypes.STRING, allowNull: false },
+    body: { type: DataTypes.TEXT, allowNull: false },
+    relatedDriverId: { type: DataTypes.INTEGER, allowNull: true },
+    status: { type: DataTypes.ENUM('sent', 'simulated', 'failed'), allowNull: false },
+    error: { type: DataTypes.TEXT, allowNull: true },
   },
-  { timestamps: true }
+  { tableName: 'email_logs', timestamps: true }
 );
 
-module.exports = mongoose.model('EmailLog', emailLogSchema);
+module.exports = EmailLog;

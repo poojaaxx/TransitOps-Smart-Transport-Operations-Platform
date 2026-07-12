@@ -1,4 +1,4 @@
-const User = require('../models/User');
+const { User, Role } = require('../models');
 const { signToken } = require('../utils/jwt');
 const asyncHandler = require('../utils/asyncHandler');
 
@@ -9,7 +9,10 @@ const login = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: 'Email and password are required' });
   }
 
-  const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+  const user = await User.findOne({
+    where: { email: email.toLowerCase() },
+    include: [{ model: Role, as: 'RoleRef' }],
+  });
   if (!user || !user.isActive) {
     return res.status(401).json({ message: 'Invalid email or password' });
   }
@@ -19,6 +22,7 @@ const login = asyncHandler(async (req, res) => {
     return res.status(401).json({ message: 'Invalid email or password' });
   }
 
+  user.role = user.RoleRef.name;
   const token = signToken(user);
   res.json({ token, user: user.toSafeObject() });
 });

@@ -1,5 +1,5 @@
 const { verifyToken } = require('../utils/jwt');
-const User = require('../models/User');
+const { User, Role } = require('../models');
 
 // Requires a valid JWT on every request. No route in the app is reachable
 // without this middleware except /api/auth/login and /api/health.
@@ -12,11 +12,15 @@ const protect = async (req, res, next) => {
     }
 
     const payload = verifyToken(token);
-    const user = await User.findById(payload.sub);
+    const user = await User.findByPk(payload.sub, { include: [{ model: Role, as: 'RoleRef' }] });
     if (!user || !user.isActive) {
       return res.status(401).json({ message: 'Not authenticated: user not found or inactive' });
     }
 
+    // Flatten the joined Role into a plain string so every downstream check
+    // (authorize() below, route handlers) can keep comparing req.user.role
+    // to plain role-name strings, same as before the MySQL migration.
+    user.role = user.RoleRef.name;
     req.user = user;
     next();
   } catch (err) {

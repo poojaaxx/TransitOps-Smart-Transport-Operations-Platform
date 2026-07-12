@@ -1,73 +1,73 @@
-const Vehicle = require('../models/Vehicle');
-const FuelLog = require('../models/FuelLog');
-const Maintenance = require('../models/Maintenance');
-const Trip = require('../models/Trip');
+const { Op, fn, col } = require('sequelize');
+const { Vehicle, VehicleDocument, FuelLog, MaintenanceLog, Trip } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { VEHICLE_STATUS } = require('../utils/constants');
 
 // GET /api/vehicles?search=&type=&status=&region=&sortBy=&sortDir=
 const listVehicles = asyncHandler(async (req, res) => {
   const { search, type, status, region, sortBy = 'createdAt', sortDir = 'desc' } = req.query;
-  const query = {};
+  const where = {};
 
   if (search) {
-    query.$or = [
-      { registrationNumber: new RegExp(search, 'i') },
-      { name: new RegExp(search, 'i') },
+    where[Op.or] = [
+      { registrationNumber: { [Op.like]: `%${search}%` } },
+      { name: { [Op.like]: `%${search}%` } },
     ];
   }
-  if (type) query.type = type;
-  if (status) query.status = status;
-  if (region) query.region = region;
+  if (type) where.type = type;
+  if (status) where.status = status;
+  if (region) where.region = region;
 
-  const vehicles = await Vehicle.find(query).sort({ [sortBy]: sortDir === 'asc' ? 1 : -1 });
+  const vehicles = await Vehicle.findAll({
+    where,
+    order: [[sortBy, sortDir === 'asc' ? 'ASC' : 'DESC']],
+  });
   res.json(vehicles);
 });
 
 // GET /api/vehicles/available - eligible dispatch pool (excludes In Shop / Retired / On Trip)
 const listAvailableVehicles = asyncHandler(async (req, res) => {
-  const vehicles = await Vehicle.find({ status: VEHICLE_STATUS.AVAILABLE }).sort({ name: 1 });
+  const vehicles = await Vehicle.findAll({
+    where: { status: VEHICLE_STATUS.AVAILABLE },
+    order: [['name', 'ASC']],
+  });
   res.json(vehicles);
 });
 
 // GET /api/vehicles/:id - includes computed operational cost
 const getVehicle = asyncHandler(async (req, res) => {
-  const vehicle = await Vehicle.findById(req.params.id);
+  const vehicle = await Vehicle.findByPk(req.params.id, {
+    include: [{ model: VehicleDocument, as: 'documents' }],
+  });
   if (!vehicle) return res.status(404).json({ message: 'Vehicle not found' });
 
-  const [fuelAgg] = await FuelLog.aggregate([
-    { $match: { vehicle: vehicle._id } },
-    { $group: { _id: null, totalFuelCost: { $sum: '$cost' }, totalLiters: { $sum: '$liters' } } },
-  ]);
-  const [maintenanceAgg] = await Maintenance.aggregate([
-    { $match: { vehicle: vehicle._id } },
-    { $group: { _id: null, totalMaintenanceCost: { $sum: '$cost' } } },
-  ]);
-  const [tripAgg] = await Trip.aggregate([
-    { $match: { vehicle: vehicle._id, status: 'Completed' } },
-    {
-      $group: {
-        _id: null,
-        totalRevenue: { $sum: '$revenue' },
-        totalDistance: { $sum: { $ifNull: ['$actualDistanceKm', '$plannedDistanceKm'] } },
-        tripCount: { $sum: 1 },
-      },
-    },
-  ]);
+  const vehicleId = vehicle._id;
 
-  const totalFuelCost = fuelAgg?.totalFuelCost || 0;
-  const totalMaintenanceCost = maintenanceAgg?.totalMaintenanceCost || 0;
+  const [totalFuelCost, totalLiters, totalMaintenanceCost, tripAgg] = await Promise.all([
+    FuelLog.sum('cost', { where: { vehicleId } }),
+    FuelLog.sum('liters', { where: { vehicleId } }),
+    MaintenanceLog.sum('cost', { where: { vehicleId } }),
+    Trip.findOne({
+      where: { vehicleId, status: 'Completed' },
+      attributes: [
+        [fn('SUM', col('revenue')), 'totalRevenue'],
+        [fn('SUM', fn('COALESCE', col('actualDistanceKm'), col('plannedDistanceKm'))), 'totalDistance'],
+        [fn('COUNT', col('_id')), 'tripCount'],
+      ],
+      raw: true,
+    }),
+  ]);
 
   res.json({
-    ...vehicle.toObject(),
+    ...vehicle.toJSON(),
     costSummary: {
-      totalFuelCost,
-      totalLiters: fuelAgg?.totalLiters || 0,
-      totalMaintenanceCost,
-      totalOperationalCost: totalFuelCost + totalMaintenanceCost,
-      totalRevenue: tripAgg?.totalRevenue || 0,
-      totalDistance: tripAgg?.totalDistance || 0,
-      completedTrips: tripAgg?.tripCount || 0,
+      totalFuelCost: totalFuelCost || 0,
+      totalLiters: totalLiters || 0,
+      totalMaintenanceCost: totalMaintenanceCost || 0,
+      totalOperationalCost: (totalFuelCost || 0) + (totalMaintenanceCost || 0),
+      totalRevenue: Number(tripAgg?.totalRevenue) || 0,
+      totalDistance: Number(tripAgg?.totalDistance) || 0,
+      completedTrips: Number(tripAgg?.tripCount) || 0,
     },
   });
 });
@@ -107,11 +107,11 @@ const updateVehicle = asyncHandler(async (req, res) => {
     if (req.body[f] !== undefined) update[f] = req.body[f];
   });
 
-  const vehicle = await Vehicle.findById(req.params.id);
+  const vehicle = await Vehicle.findByPk(req.params.id);
   if (!vehicle) return res.status(404).json({ message: 'Vehicle not found' });
 
   if (update.status && vehicle.status === VEHICLE_STATUS.ON_TRIP && update.status !== VEHICLE_STATUS.ON_TRIP) {
-    const activeTrip = await Trip.findOne({ vehicle: vehicle._id, status: 'Dispatched' });
+    const activeTrip = await Trip.findOne({ where: { vehicleId: vehicle._id, status: 'Dispatched' } });
     if (activeTrip) {
       return res
         .status(409)
@@ -119,23 +119,22 @@ const updateVehicle = asyncHandler(async (req, res) => {
     }
   }
 
-  Object.assign(vehicle, update);
-  await vehicle.save();
+  await vehicle.update(update);
   res.json(vehicle);
 });
 
 // DELETE /api/vehicles/:id
 const deleteVehicle = asyncHandler(async (req, res) => {
   const activeTrip = await Trip.findOne({
-    vehicle: req.params.id,
-    status: { $in: ['Draft', 'Dispatched'] },
+    where: { vehicleId: req.params.id, status: { [Op.in]: ['Draft', 'Dispatched'] } },
   });
   if (activeTrip) {
     return res.status(409).json({ message: 'Cannot delete a vehicle with draft or dispatched trips' });
   }
 
-  const vehicle = await Vehicle.findByIdAndDelete(req.params.id);
+  const vehicle = await Vehicle.findByPk(req.params.id);
   if (!vehicle) return res.status(404).json({ message: 'Vehicle not found' });
+  await vehicle.destroy();
   res.json({ message: 'Vehicle deleted' });
 });
 
