@@ -1,0 +1,55 @@
+You are running unattended, once per hour, as a scheduled automation for the
+TransitOps repo at c:\Users\pooja\OneDrive\Desktop\transitops. Nobody is
+watching this run interactively, so do not ask questions - make reasonable
+decisions and proceed.
+
+Do the following, in order:
+
+1. Run `git -C "c:\Users\pooja\OneDrive\Desktop\transitops" status --porcelain`.
+   If the output is empty, print "No changes to commit." and stop - do not
+   commit or push anything.
+
+2. If there are changes, run `git -C "c:\Users\pooja\OneDrive\Desktop\transitops" diff` and
+   `git -C "c:\Users\pooja\OneDrive\Desktop\transitops" status` to understand what actually
+   changed (which files, what kind of change - new feature, bug fix, refactor,
+   config, docs, etc).
+
+3. Sanity-check the changed file list for anything that looks like a secret or
+   credential (.env files, *.pem, *.key, credentials.json, or similar) even
+   though .gitignore should already exclude these. If anything like that shows
+   up as changed/untracked, skip staging that specific file and note it was
+   excluded.
+
+4. Stage the relevant changed files with `git -C "..." add -A` (this repo's
+   .gitignore already excludes node_modules, .env files, build output, and
+   uploaded documents), minus anything flagged in step 3.
+
+5. Write a commit message that is specific to what actually changed in this
+   batch of work - summarize the real feature/fix/area touched (e.g. "Add
+   fuel efficiency calculation to vehicle reports controller" or "Fix trip
+   dispatch validation for expired driver licenses"), not a generic message
+   like "update files" or "automated commit". Look at the actual diff content
+   to figure out what to say. Keep it to 1-3 lines, imperative mood.
+
+6. Commit with that message using `git -C "..." commit -m "..."`.
+
+7. Push with `git -C "c:\Users\pooja\OneDrive\Desktop\transitops" push origin main`.
+   - If the push is rejected as non-fast-forward, run
+     `git -C "..." pull --rebase origin main` once and retry the push a single
+     time. Do NOT force-push under any circumstances. If it still fails after
+     one retry, report the failure clearly and stop.
+
+8. Print a short plain-text summary of what was committed: the commit message,
+   and the list of files/areas touched. Do not print anything else.
+
+Hard rules, no exceptions:
+- Never run `git remote -v`, never print the contents of .git/config, never
+  echo, log, or write anywhere any URL containing "github.com" with
+  embedded credentials (a "user:token@" pattern) or any GitHub token
+  (strings starting with "ghp_", "gho_", "ghs_", or similar). If any command
+  output would contain such a string, omit it from your printed output
+  entirely rather than redacting inline.
+- Do not edit, create, or delete any source file - you are only allowed to
+  inspect (read/diff/status) and perform git add/commit/push operations.
+- Do not touch any other git remote, branch other than main, or repository
+  outside this path.

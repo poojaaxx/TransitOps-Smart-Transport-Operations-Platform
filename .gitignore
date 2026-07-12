@@ -9,3 +9,4 @@ backend/uploads/documents/*
 !backend/uploads/documents/.gitkeep
 .DS_Store
 Thumbs.db
+logs/
