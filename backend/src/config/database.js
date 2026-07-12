@@ -1,5 +1,10 @@
 const { Sequelize } = require('sequelize');
 
+// Managed MySQL providers (Aiven, PlanetScale, etc.) require TLS and present
+// a cert not in Node's default trust store. Toggle via DB_SSL=true rather
+// than assuming - local dev MySQL has no TLS listener at all.
+const useSSL = process.env.DB_SSL === 'true';
+
 const sequelize = new Sequelize(
   process.env.DB_NAME || 'transitops',
   process.env.DB_USER || 'root',
@@ -9,6 +14,7 @@ const sequelize = new Sequelize(
     port: Number(process.env.DB_PORT) || 3306,
     dialect: 'mysql',
     logging: false,
+    dialectOptions: useSSL ? { ssl: { rejectUnauthorized: false } } : {},
   }
 );
 

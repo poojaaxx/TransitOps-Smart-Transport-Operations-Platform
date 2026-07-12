@@ -10,3 +10,4 @@ backend/uploads/documents/*
 .DS_Store
 Thumbs.db
 logs/
+.claude/
