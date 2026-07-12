@@ -158,15 +158,7 @@ These are enforced in the controllers (server-side), not just suggested by the U
 
 ## Screenshots
 
-> No visual/browser-automation tool was available to capture these directly in this session, so the images below are placeholders. **To fill them in:** run the app locally (see [Getting Started](#getting-started)), log in as each demo account, and save screenshots to `docs/screenshots/` using the filenames listed — then this section will render automatically on GitHub.
-
-| Page | File to save |
-|---|---|
-| Login page | `docs/screenshots/login.png` |
-| Dashboard (KPIs + charts, logged in as Fleet Manager) | `docs/screenshots/dashboard.png` |
-| Vehicle registry (list + filters) | `docs/screenshots/vehicles.png` |
-| Trip management (dispatch/complete flow) | `docs/screenshots/trips.png` |
-| Reports page (CSV/PDF export) | `docs/screenshots/reports.png` |
+Captured directly from the [live deployment](#live-demo), logged in as the Fleet Manager demo account.
 
 <p align="center">
   <img src="docs/screenshots/login.png" alt="Login page" width="45%">
