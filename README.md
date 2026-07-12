@@ -1,13 +1,13 @@
 # TransitOps — Smart Transport Operations Platform
 
-A full-stack MERN app for managing a vehicle fleet: vehicles, drivers, trips,
+A full-stack app for managing a vehicle fleet: vehicles, drivers, trips,
 maintenance, fuel/expenses, and reporting, with role-based access for four
 staff roles (Fleet Manager, Driver, Safety Officer, Financial Analyst).
 
 ## Tech stack
 
 - **Frontend:** React (Vite), React Router, Tailwind CSS v4, Recharts
-- **Backend:** Node.js, Express 5, MongoDB, Mongoose
+- **Backend:** Node.js, Express 5, MySQL, Sequelize
 - **Auth:** JWT + bcrypt (bcryptjs), 4-role RBAC enforced server-side
 - **Uploads:** Multer (vehicle documents)
 - **Email:** Nodemailer (falls back to console/DB logging if SMTP isn't configured)
@@ -27,14 +27,17 @@ transitops/
 ## Prerequisites
 
 - Node.js 18+
-- A MongoDB instance — either:
-  - **Local:** install MongoDB Community Server and have `mongod` running on `127.0.0.1:27017`, or
-  - **Atlas:** a free cluster at https://www.mongodb.com/atlas — grab its connection string
-
-> This project was scaffolded in an environment with no local MongoDB and no
-> Docker available, so the backend has been syntax-checked but not run
-> end-to-end. Set `MONGO_URI` (see below) and it should connect on the first try —
-> if you hit an issue, check the server console output first.
+- A running MySQL server (MySQL 8+ recommended) — either:
+  - **Local:** install MySQL Community Server (or MySQL Workbench's bundled server)
+    and have it running on `127.0.0.1:3306`, or
+  - **Cloud/managed:** any hosted MySQL instance (PlanetScale, RDS, etc.) — grab its
+    host/port/user/password
+- The database itself (`transitops` by default) does **not** need to exist ahead
+  of time for the app to start — `npm run seed` creates/recreates all tables via
+  Sequelize `sync({ force: true })` — but the MySQL *server* and the target
+  database schema must be reachable with the credentials in `.env` (create the
+  database once with `CREATE DATABASE transitops;` if your MySQL user doesn't
+  have permission to create databases itself).
 
 ## 1. Install dependencies
 
@@ -56,10 +59,12 @@ cp frontend/.env.example frontend/.env
 
 Edit `backend/.env`:
 
-- `MONGO_URI` — local (`mongodb://127.0.0.1:27017/transitops`) or your Atlas connection string
+- `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` — your MySQL
+  connection details (defaults assume a local server on `127.0.0.1:3306` with
+  a `root` user)
 - `JWT_SECRET` — any long random string
 - `SMTP_*` — optional; leave blank to simulate license-reminder emails (they're
-  logged to the console and saved to the `EmailLog` collection instead of sent)
+  logged to the console and saved to the `EmailLog` table instead of sent)
 
 `frontend/.env` can stay empty for local dev — the Vite dev server proxies
 `/api` and `/uploads` to `http://localhost:5000` (see `frontend/vite.config.js`).
@@ -70,9 +75,11 @@ Edit `backend/.env`:
 npm run seed
 ```
 
-Seeds 4 users (one per role), 7 vehicles, 6 drivers, and trips/maintenance/fuel/
-expense records covering every lifecycle state. All demo accounts use the
-password `Password123!`:
+This drops and recreates every table (`sequelize.sync({ force: true })`) then
+seeds 4 roles, 4 users (one per role), 7 vehicles, 6 drivers, and trips/
+maintenance/fuel/expense records covering every lifecycle state. Safe to
+re-run any time you want a clean slate. All demo accounts use the password
+`Password123!`:
 
 | Role | Email |
 |---|---|
